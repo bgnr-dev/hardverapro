@@ -1,0 +1,16 @@
+# Egy szabály soronként. A # -tel kezdődő sorok kimaradnak.
+#
+# Formátumok:
+#   kulcsszó [-kizárt ...] [maxár]
+#   https://hardverapro.hu/aprok/.../index.html kulcsszó [-kizárt ...] [maxár]
+#
+# Tip: ha a globális kereső átirányít, másold be a kategória listázó URL-jét
+# + kulcsszót — a címben szűr a script.
+#
+# Példák:
+# RTX 4070 [200k]
+# Thinkpad T16 -FHD -4K [450e]
+# https://hardverapro.hu/aprok/hardver/processzor/index.html 5950x [80k]
+# https://hardverapro.hu/aprok/hardver/videokartya/index.html 4070 -Ti [250000]
+
+https://hardverapro.hu/aprok/hardver/videokartya/index.html 4070
