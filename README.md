@@ -73,12 +73,10 @@ Az első futtatás az aktuális találatokat újnak tekinti. Az állapot a `stat
 [22:42:17] Kész — nincs új hirdetés
 ```
 
-**Monitor mód (`-m`) — csak újnál ír:**
+**Monitor mód (`-m`) — csak újnál ír, HTML e-mailhez:**
 
-```text
-[22:45:01] Új hirdetések:
-[22:45:01] 'x570' — 1 új
-    ma 22:40 |       42 000 Ft | ASRock X570 Phantom Gaming 4 | https://hardverapro.hu/apro/…
+```html
+<!DOCTYPE html>… kompakt táblázat ár / dátum / kattintható cím …
 ```
 
 Ha nincs új: *nincs kimenet*.
@@ -93,12 +91,13 @@ crontab -e
 */45 * * * * cd /eleresi/ut/hardverapro-figyelo && python3 scraper.py -m >> figyelo.log 2>&1
 ```
 
-E-mail csak akkor, ha van kimenet:
+E-mail csak akkor, ha van kimenet (`mailx -E` / `mysendmail`):
 
 ```cron
-*/45 * * * * cd /eleresi/ut/hardverapro-figyelo && OUTPUT=$(python3 scraper.py -m) && [ -n "$OUTPUT" ] && echo "$OUTPUT" | mail -s "hardverapro: új hirdetés" te@pelda.hu
+*/15 6-22 * * * cd /eleresi/ut/hardverapro-figyelo && python3 scraper.py -m | mysendmail "Hardverapro monitor"
 ```
 
+A `-m` kimenet HTML (`text/html`); a `mysendmail` ezt automatikusan felismeri.
 ## Fájlok
 
 | Fájl | Szerep |

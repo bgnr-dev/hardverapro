@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html as html_lib
 import json
 import re
 import sys
@@ -265,6 +266,11 @@ def parse_ads(
                 continue
 
         link = href if href.startswith("http") else f"https://hardverapro.hu{href}"
+        parent = box.parent
+        iced = bool(
+            parent
+            and "uad-status-iced" in (parent.get("class") or [])
+        ) or bool(box.select_one(".uad-price-iced"))
 
         ads.append(
             {
@@ -273,6 +279,7 @@ def parse_ads(
                 "price": price,
                 "link": link,
                 "posted": posted,
+                "iced": iced,
             }
         )
     return ads
@@ -280,7 +287,89 @@ def parse_ads(
 
 def fmt_ad(ad: dict) -> str:
     posted = (ad.get("posted") or "N/A")[:10]
-    return f"  {posted:>10} | {ad['price']:>15} | {ad['title'][:80]} | {ad['link']}"
+    title = ad["title"]
+    if ad.get("iced"):
+        title = f"🧊 {title}"
+    return f"  {posted:>10} | {ad['price']:>15} | {title[:80]} | {ad['link']}"
+
+
+def render_html_report(
+    groups: list[tuple[str, list[dict]]], *, all_matches: bool = False
+) -> str:
+    """Kompakt, e-mail-barát HTML az új hirdetésekről (vagy teljes snapshot)."""
+    esc = html_lib.escape
+    total = sum(len(ads) for _, ads in groups)
+    when = ts()
+    kind = "találat" if all_matches else "új"
+    th = (
+        "padding:6px 10px 6px 0;font-size:11px;font-weight:650;"
+        "color:#888;text-transform:uppercase;letter-spacing:.04em;"
+        "border-bottom:1px solid #e5e5e5;text-align:left"
+    )
+    td_date = (
+        "padding:7px 10px 7px 0;white-space:nowrap;vertical-align:top;"
+        "font-size:12px;color:#888"
+    )
+    td_price = (
+        "padding:7px 10px;white-space:nowrap;vertical-align:top;font-weight:650"
+    )
+    td_title = "padding:7px 0;vertical-align:top"
+    out: list[str] = [
+        "<!DOCTYPE html>",
+        '<html><head><meta charset="utf-8">',
+        f"<title>Hardverapró — {total} {kind}</title></head>",
+        '<body style="margin:0;padding:16px;font:14px/1.45 -apple-system,'
+        "BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1a1a;"
+        'background:#f4f5f7">',
+        '<div style="max-width:640px;margin:0 auto;background:#fff;'
+        'border-radius:8px;padding:20px 18px 24px;'
+        'box-shadow:0 1px 3px rgba(0,0,0,.08)">',
+        f'<p style="margin:0 0 4px;font-size:18px;font-weight:650;'
+        f'text-align:center">Hardverapró — {total} {kind}</p>',
+        f'<p style="margin:0 0 8px;font-size:12px;color:#888;text-align:center">'
+        f"{esc(when)}</p>",
+    ]
+    for name, ads in groups:
+        out.append(
+            f'<div style="margin:28px 0 14px;padding:14px 12px;'
+            f'background:#f7f8fa;border-radius:6px;text-align:center">'
+            f'<div style="font-size:17px;font-weight:700;letter-spacing:.01em;'
+            f'line-height:1.3">{esc(name)}</div>'
+            f'<div style="margin-top:4px;font-size:12px;color:#888">'
+            f"{len(ads)} {kind}</div></div>"
+        )
+        out.append('<table style="width:100%;border-collapse:collapse">')
+        out.append(
+            "<tr>"
+            f'<th style="{th}">Dátum</th>'
+            f'<th style="{th}">Ár</th>'
+            f'<th style="{th}">Cím</th>'
+            "</tr>"
+        )
+        for ad in ads:
+            posted = esc((ad.get("posted") or "—")[:12])
+            price = esc(ad.get("price") or "N/A")
+            title = esc(ad.get("title") or "")
+            link = esc(ad.get("link") or "#", quote=True)
+            badge = ""
+            if ad.get("iced"):
+                badge = (
+                    '<span style="display:inline-block;margin-right:6px;padding:1px 5px;'
+                    "border-radius:3px;background:#e3f2fd;vertical-align:middle\" "
+                    'title="jégelt">🧊</span>'
+                )
+            out.append(
+                "<tr>"
+                f'<td style="{td_date}">{posted}</td>'
+                f'<td style="{td_price}">{price}</td>'
+                f'<td style="{td_title}">{badge}'
+                f'<a href="{link}" style="color:#0b57d0;text-decoration:none">'
+                f"{title}</a></td>"
+                "</tr>"
+            )
+        out.append("</table>")
+    out.append("</div></body></html>")
+    return "\n".join(out)
 
 
 def label(s: dict) -> str:
@@ -302,6 +391,7 @@ def run(monitor: bool, show_all: bool) -> int:
 
     state = load_state()
     found_new = False
+    monitor_groups: list[tuple[str, list[dict]]] = []
     browser = Browser()
 
     if not monitor:
@@ -314,8 +404,8 @@ def run(monitor: bool, show_all: bool) -> int:
             excl = f" (kizárva: {', '.join(s['exclude'])})" if s["exclude"] else ""
 
             try:
-                final_url, html = browser.fetch(url)
-                ads = parse_ads(html, s["terms"], s["exclude"], s.get("max_price"))
+                final_url, page_html = browser.fetch(url)
+                ads = parse_ads(page_html, s["terms"], s["exclude"], s.get("max_price"))
             except Exception as e:
                 print(f"[{ts()}] HIBA '{name}': {e}", file=sys.stderr)
                 continue
@@ -339,13 +429,12 @@ def run(monitor: bool, show_all: bool) -> int:
             state[s["key"]] = sorted(prev | curr)
 
             if monitor:
+                # -m: csak új; -a -m: minden aktuális találat (teszt / teljes snapshot e-mail)
+                report_ads = ads if show_all else new_ads
+                if report_ads:
+                    monitor_groups.append((name, report_ads))
                 if new_ads:
-                    if not found_new:
-                        print(f"[{ts()}] Új hirdetések:")
                     found_new = True
-                    print(f"[{ts()}] '{name}' — {len(new_ads)} új")
-                    for ad in new_ads:
-                        print(fmt_ad(ad))
             elif show_all:
                 tag = f"{len(new_ads)} új / " if new_ads else ""
                 print(f"[{ts()}] '{name}'{excl}… {tag}{len(ads)} találat")
@@ -371,11 +460,13 @@ def run(monitor: bool, show_all: bool) -> int:
         browser.close()
         save_state(state)
 
-    if not monitor:
-        if found_new:
-            print(f"[{ts()}] Kész — van új hirdetés")
-        else:
-            print(f"[{ts()}] Kész — nincs új hirdetés")
+    if monitor:
+        if monitor_groups:
+            print(render_html_report(monitor_groups, all_matches=show_all))
+    elif found_new:
+        print(f"[{ts()}] Kész — van új hirdetés")
+    else:
+        print(f"[{ts()}] Kész — nincs új hirdetés")
 
     return 1 if found_new else 0
 
@@ -386,13 +477,13 @@ def main() -> None:
         "-m",
         "--monitor",
         action="store_true",
-        help="csendes mód: csak új hirdetésnél ír ki (cron)",
+        help="csendes mód: csak új hirdetésnél ír ki HTML reportot (cron/mail)",
     )
     p.add_argument(
         "-a",
         "--show-all",
         action="store_true",
-        help="minden egyező hirdetést kiír",
+        help="minden egyező hirdetést kiír; -m-mel: teljes HTML snapshot (nem csak új)",
     )
     args = p.parse_args()
     sys.exit(run(monitor=args.monitor, show_all=args.show_all))
