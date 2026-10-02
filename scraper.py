@@ -155,8 +155,7 @@ def build_search_url(terms: list[str], max_price: int | None = None) -> str:
         ("cmpid", ""),
         ("usrid_text", ""),
         ("usrid", ""),
-        ("__buying", "1"),
-        ("__buying", "0"),
+        ("__buying", "0"),  # csak eladó hirdetések (ne „Keresek:”)
         ("__brandnew", "1"),
         ("__brandnew", "0"),
         ("stext_none", ""),
@@ -336,7 +335,8 @@ def run(monitor: bool, show_all: bool) -> int:
             prev = set(state.get(s["key"], []))
             curr = {a["id"] for a in ads}
             new_ads = [a for a in ads if a["id"] not in prev]
-            state[s["key"]] = sorted(curr)
+            # Látott ID-k gyűjtése (ne töröljük, ha egy hirdetés átmenetileg kiesik a listából)
+            state[s["key"]] = sorted(prev | curr)
 
             if monitor:
                 if new_ads:
